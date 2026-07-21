@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Checklist: 6 Remedios Caseros para la Sarna | Peluditos al Día</title>
 
+    <!-- Librerías para el botón "Descargar PDF" (descarga directa, sin diálogo) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
     <style>
         /* ========== ESTILOS GLOBALES ========== */
         * {
@@ -16,8 +20,6 @@
         body {
             font-family: 'Segoe UI', Roboto, Arial, sans-serif;
             background: #f0f4f8;
-            display: flex;
-            justify-content: center;
             padding: 25px 15px;
             min-height: 100vh;
         }
@@ -25,6 +27,7 @@
         .wrapper {
             max-width: 860px;
             width: 100%;
+            margin: 0 auto;
             background: #ffffff;
             border-radius: 28px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.10);
@@ -411,6 +414,7 @@
             body {
                 background: #fff !important;
                 padding: 0 !important;
+                min-height: 0 !important;
             }
             .wrapper {
                 box-shadow: none !important;
@@ -705,10 +709,10 @@
             <p>📥 Descarga este checklist o compártelo con otros dueños de mascotas</p>
 
             <div class="btn-group">
-                <button class="btn btn-green" onclick="generarPDF()">
+                <button class="btn btn-green" onclick="descargarPDF()">
                     ⬇️ Descargar PDF
                 </button>
-                <button class="btn btn-outline" onclick="window.scrollTo(0,0); window.print();">
+                <button class="btn btn-outline" onclick="imprimirOGuardar()">
                     🖨️ Imprimir / Guardar
                 </button>
             </div>
@@ -758,37 +762,93 @@
         });
     </script>
 
-    <!-- ========== SCRIPT PARA DESCARGAR / IMPRIMIR ========== -->
+    <!-- ========== SCRIPT: DESCARGAR PDF / IMPRIMIR-GUARDAR ========== -->
     <script>
-        // NOTA IMPORTANTE:
-        // Antes este botón usaba la librería html2pdf.js (html2canvas) para
-        // generar el PDF "por dentro" del navegador. Esa técnica falla en
-        // muchos celulares y navegadores y produce el PDF en blanco que
-        // reportaste. Por eso ahora ambos botones usan el motor de
-        // impresión NATIVO del navegador (el mismo que usa Ctrl+P), que sí
-        // dibuja el contenido correctamente el 100% de las veces.
+        // BOTÓN 1 — "Descargar PDF": genera el archivo y lo descarga directo
+        // a la carpeta de Descargas, sin diálogos. Usa html2canvas + jsPDF.
         //
-        // Al hacer clic, se abre el diálogo de impresión: el usuario solo
-        // debe elegir como destino/impresora "Guardar como PDF".
+        // BOTÓN 2 — "Imprimir / Guardar": abre el diálogo nativo de
+        // impresión del navegador (Ctrl+P), donde el usuario elige
+        // imprimir en papel o "Guardar como PDF" manualmente.
+        //
+        // NOTA: el bug del PDF/impresión en blanco era causado por
+        // "display: flex" en el <body>, que rompe la paginación al
+        // imprimir contenido largo en varios navegadores. Ya se corrigió
+        // (ahora el centrado se hace con margin:auto, sin flex).
 
-        function abrirDialogoDescarga() {
+        async function descargarPDF() {
             const btn = document.querySelector('.btn-green');
             const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Abriendo...';
-            btn.disabled = true;
 
+            if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+                alert('No se pudieron cargar las librerías para generar el PDF (revisa tu conexión a internet). Usa el botón "Imprimir / Guardar" como alternativa.');
+                return;
+            }
+
+            btn.innerHTML = '⏳ Generando PDF...';
+            btn.disabled = true;
             window.scrollTo(0, 0);
 
-            setTimeout(function () {
-                window.print();
+            try {
+                // Pequeña espera para que el layout termine de pintarse.
+                await new Promise(resolve => setTimeout(resolve, 150));
+
+                const element = document.getElementById('checklist-content');
+                const canvas = await html2canvas(element, {
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff',
+                    scrollX: 0,
+                    scrollY: 0,
+                    windowWidth: element.scrollWidth,
+                    windowHeight: element.scrollHeight
+                });
+
+                if (canvas.width === 0 || canvas.height === 0) {
+                    throw new Error('El área capturada quedó vacía.');
+                }
+
+                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'letter');
+
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = pdf.internal.pageSize.getHeight();
+                const imgWidth = pdfWidth;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pdfHeight;
+
+                // Si el contenido es más alto que una página, se reparte
+                // en páginas adicionales desplazando la misma imagen hacia
+                // arriba (técnica estándar de recorte por páginas).
+                while (heightLeft > 0) {
+                    position = heightLeft - imgHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pdfHeight;
+                }
+
+                pdf.save('Checklist_6_Remedios_Sarna_PeluditosAlDia.pdf');
+            } catch (err) {
+                console.error('Error generando PDF:', err);
+                alert('Hubo un error generando el PDF. Usa el botón "Imprimir / Guardar" como alternativa.');
+            } finally {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
-            }, 100);
+            }
         }
 
-        function generarPDF() {
-            // Alias para mantener compatibilidad con el botón existente.
-            abrirDialogoDescarga();
+        function imprimirOGuardar() {
+            window.scrollTo(0, 0);
+            setTimeout(function () {
+                window.print();
+            }, 100);
         }
     </script>
 
